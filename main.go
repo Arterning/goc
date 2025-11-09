@@ -1,3 +1,16 @@
+// Package main 是 GoC 编译器的入口点
+// GoC 是一个类 C 语言编译器，使用 Go 语言编写，LLVM 作为后端
+//
+// 编译流程：
+// 源代码 -> 词法分析 -> 语法分析 -> 语义分析 -> 代码生成 -> LLVM IR -> Clang -> 可执行文件
+//
+// 使用方法：
+//   goc <source-file>
+//   例如：goc examples/hello.goc
+//
+// 输出：
+//   - <source-file>.ll    LLVM IR 中间代码
+//   - <source-file>.exe   可执行文件
 package main
 
 import (
@@ -12,7 +25,14 @@ import (
 	"strings"
 )
 
+// main 编译器主函数
+// 负责：
+// 1. 解析命令行参数
+// 2. 读取源文件
+// 3. 调用编译流程
+// 4. 处理错误
 func main() {
+	// 检查命令行参数
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: goc <source-file>")
 		fmt.Println("Example: goc program.goc")
@@ -21,14 +41,14 @@ func main() {
 
 	sourceFile := os.Args[1]
 
-	// Read source file
+	// 读取源文件内容
 	source, err := os.ReadFile(sourceFile)
 	if err != nil {
 		fmt.Printf("Error reading file: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Compile
+	// 执行编译
 	if err := compile(string(source), sourceFile); err != nil {
 		fmt.Printf("Compilation failed: %v\n", err)
 		os.Exit(1)
@@ -37,16 +57,48 @@ func main() {
 	fmt.Println("Compilation successful!")
 }
 
+// compile 编译源代码的核心函数
+// 参数 source: 源代码字符串
+// 参数 sourceFile: 源文件路径（用于生成输出文件名）
+// 返回值: 编译错误（如果有）
+//
+// 编译流程（编译器前端的经典四个阶段）：
+//
+// 1. 词法分析（Lexical Analysis）
+//    输入：源代码字符串
+//    输出：Token 流
+//    功能：将字符序列分解为词法单元
+//
+// 2. 语法分析（Syntax Analysis）
+//    输入：Token 流
+//    输出：抽象语法树（AST）
+//    功能：根据语法规则构建程序的树形结构
+//
+// 3. 语义分析（Semantic Analysis）
+//    输入：AST
+//    输出：类型标注的 AST
+//    功能：检查类型、作用域、语义正确性
+//
+// 4. 代码生成（Code Generation）
+//    输入：类型标注的 AST
+//    输出：LLVM IR
+//    功能：将高级语法转换为中间表示
+//
+// 5. 后端编译（Backend Compilation）
+//    输入：LLVM IR
+//    输出：可执行文件
+//    工具：Clang（LLVM 的 C 编译器）
 func compile(source string, sourceFile string) error {
-	// Lexical analysis
+	// ========== 阶段 1: 词法分析 ==========
 	fmt.Println("=== Lexical Analysis ===")
 	lex := lexer.New(source)
 
-	// Syntax analysis
+	// ========== 阶段 2: 语法分析 ==========
 	fmt.Println("=== Syntax Analysis ===")
 	p := parser.New(lex)
 	program := p.ParseProgram()
 
+	// 检查语法错误
 	if len(p.Errors()) > 0 {
 		fmt.Println("Parser errors:")
 		for _, err := range p.Errors() {
@@ -56,7 +108,7 @@ func compile(source string, sourceFile string) error {
 	}
 	fmt.Println("Parsing successful")
 
-	// Semantic analysis
+	// ========== 阶段 3: 语义分析 ==========
 	fmt.Println("=== Semantic Analysis ===")
 	analyzer := semantic.New()
 	if !analyzer.Analyze(program) {
@@ -68,7 +120,7 @@ func compile(source string, sourceFile string) error {
 	}
 	fmt.Println("Semantic analysis successful")
 
-	// Code generation
+	// ========== 阶段 4: 代码生成 ==========
 	fmt.Println("=== Code Generation ===")
 	gen := codegen.New(analyzer)
 	module, err := gen.Generate(program)
@@ -76,7 +128,8 @@ func compile(source string, sourceFile string) error {
 		return fmt.Errorf("code generation failed: %v", err)
 	}
 
-	// Write LLVM IR to file
+	// 写入 LLVM IR 到文件
+	// 例如：hello.goc -> hello.ll
 	baseName := strings.TrimSuffix(sourceFile, filepath.Ext(sourceFile))
 	llFile := baseName + ".ll"
 
@@ -86,10 +139,12 @@ func compile(source string, sourceFile string) error {
 	}
 	fmt.Printf("LLVM IR written to %s\n", llFile)
 
-	// Compile LLVM IR to object file using clang
+	// ========== 阶段 5: 后端编译 ==========
+	// 使用 Clang 将 LLVM IR 编译为可执行文件
 	fmt.Println("=== Compiling to executable ===")
 	objFile := baseName + ".exe"
 
+	// 调用系统命令：clang hello.ll -o hello.exe
 	cmd := exec.Command("clang", llFile, "-o", objFile)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

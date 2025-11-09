@@ -1,3 +1,26 @@
+// Package codegen 提供 LLVM IR 代码生成器实现
+// 代码生成器（Code Generator）是编译器前端的最后一个阶段
+// 负责将 AST 转换为 LLVM IR（中间表示）
+//
+// 工作流程：
+// 类型标注的 AST -> 代码生成器 -> LLVM IR -> Clang -> 机器码
+//
+// 主要功能：
+// 1. 将高级语法结构转换为 LLVM IR 指令
+// 2. 管理变量存储（使用 alloca 分配栈空间）
+// 3. 生成控制流图（CFG）
+// 4. 处理类型转换和运算符
+//
+// LLVM IR 简介：
+// - SSA 形式（Static Single Assignment）：每个变量只赋值一次
+// - 基本块（Basic Block）：顺序执行的指令序列
+// - 控制流（Control Flow）：基本块之间的跳转
+//
+// 关键概念：
+// - alloca: 在栈上分配内存
+// - load: 从内存加载值
+// - store: 向内存存储值
+// - phi: SSA 形式中的选择指令
 package codegen
 
 import (
@@ -13,17 +36,20 @@ import (
 	"github.com/llir/llvm/ir/value"
 )
 
-// Generator generates LLVM IR from an AST
+// Generator LLVM IR 代码生成器结构体
+// 负责遍历 AST 并生成对应的 LLVM IR 代码
 type Generator struct {
-	module      *ir.Module
-	builder     *ir.Block
-	currentFunc *ir.Func
-	analyzer    *semantic.Analyzer
-	variables   map[string]value.Value // Variable storage (alloca instructions)
-	functions   map[string]*ir.Func
+	module      *ir.Module           // LLVM 模块（包含所有函数和全局变量）
+	builder     *ir.Block            // 当前正在构建的基本块
+	currentFunc *ir.Func             // 当前正在生成的函数
+	analyzer    *semantic.Analyzer   // 语义分析器（用于获取表达式类型）
+	variables   map[string]value.Value // 变量存储映射（变量名 -> alloca 指令）
+	functions   map[string]*ir.Func  // 函数映射（函数名 -> LLVM 函数）
 }
 
-// New creates a new Generator
+// New 创建一个新的代码生成器
+// 参数 analyzer: 语义分析器（用于获取类型信息）
+// 返回值: 初始化好的 Generator
 func New(analyzer *semantic.Analyzer) *Generator {
 	return &Generator{
 		module:    ir.NewModule(),
@@ -33,16 +59,31 @@ func New(analyzer *semantic.Analyzer) *Generator {
 	}
 }
 
-// Generate generates LLVM IR for the program
+// ========== 代码生成入口 ==========
+
+// Generate 为整个程序生成 LLVM IR
+// 参数 program: 经过语义分析的 AST
+// 返回值: (LLVM 模块, 错误)
+//
+// 生成策略（两遍扫描）：
+// 第一遍：声明所有函数签名
+//   - 这样可以支持函数的前向引用
+// 第二遍：生成函数体
+//   - 生成详细的 LLVM IR 指令
+//
+// 生成的 LLVM IR 特点：
+// - 使用内存模型（alloca/load/store）而不是 SSA 寄存器
+// - 每个变量对应一个栈上的内存位置
+// - 简化了代码生成，但可能不是最优的 IR
 func (g *Generator) Generate(program *parser.Program) (*ir.Module, error) {
-	// First pass: declare all functions
+	// 第一遍：声明所有函数签名
 	for _, fn := range program.Functions {
 		if err := g.declareFunctionSignature(fn); err != nil {
 			return nil, err
 		}
 	}
 
-	// Second pass: generate function bodies
+	// 第二遍：生成函数体
 	for _, fn := range program.Functions {
 		if err := g.generateFunction(fn); err != nil {
 			return nil, err
