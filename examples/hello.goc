@@ -1,0 +1,5 @@
+// Simple Hello World - returns 42
+int main() {
+    x = 42
+    return x
+}

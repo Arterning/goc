@@ -1,0 +1,14 @@
+// Fibonacci function
+int fib(int n) {
+    if (n <= 1) {
+        return n
+    }
+    a = fib(n - 1)
+    b = fib(n - 2)
+    return a + b
+}
+
+int main() {
+    result = fib(10)
+    return result
+}

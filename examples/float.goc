@@ -1,0 +1,12 @@
+// Float arithmetic
+int main() {
+    float x
+    float y
+    x = 3.14
+    y = 2.0
+    float result
+    result = x * y
+
+    // Return 0 for success
+    return 0
+}
