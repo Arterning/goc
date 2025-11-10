@@ -110,6 +110,11 @@ type Analyzer struct {
 // 返回值: 初始化好的 Analyzer
 func New() *Analyzer {
 	globalScope := NewScope(nil) // 创建全局作用域
+
+	// 注册内建函数
+	// print 函数：接受任意参数，返回 void（用 int 代替）
+	globalScope.Define("print", types.IntType, "function")
+
 	return &Analyzer{
 		globalScope:  globalScope,
 		currentScope: globalScope, // 初始时，当前作用域就是全局作用域
@@ -334,6 +339,10 @@ func (a *Analyzer) analyzeExpression(expr parser.Expression) types.Type {
 	case *parser.FloatLiteral:
 		a.exprTypes[expr] = types.FloatType
 		return types.FloatType
+	case *parser.StringLiteral:
+		// 字符串字面量类型（暂时用 IntType 作为占位符）
+		a.exprTypes[expr] = types.IntType
+		return types.IntType
 	case *parser.Identifier:
 		return a.analyzeIdentifier(e)
 	case *parser.BinaryExpr:

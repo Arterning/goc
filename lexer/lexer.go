@@ -182,6 +182,13 @@ func (l *Lexer) NextToken() Token {
 		tok = newToken(COMMA, l.ch, l.line, l.column)
 	case ';':
 		tok = newToken(SEMI, l.ch, l.line, l.column)
+	case '"':
+		// 处理字符串字面量
+		tok.Line = l.line
+		tok.Column = l.column
+		tok.Type = STRING_LIT
+		tok.Literal = l.readString()
+		return tok // 直接返回，因为 readString 已经移动了位置
 	case 0:
 		// 到达文件末尾
 		tok.Literal = ""
@@ -324,6 +331,37 @@ func (l *Lexer) skipComment() {
 	for l.ch != '\n' && l.ch != 0 {
 		l.readChar()
 	}
+}
+
+// readString 读取一个字符串字面量
+// 字符串格式：用双引号 " 包围
+//
+// 工作流程：
+// 1. 跳过起始的双引号 "
+// 2. 读取字符直到遇到结束的双引号 "
+// 3. 支持转义字符（\n, \t, \", \\）
+// 4. 返回字符串内容（不包括双引号）
+//
+// 例如：
+// "hello"     -> "hello"
+// "hello\n"   -> "hello\n"（带换行符）
+// "say \"hi\"" -> "say \"hi\""（转义双引号）
+func (l *Lexer) readString() string {
+	position := l.position + 1 // 跳过起始的 "
+	for {
+		l.readChar()
+		// 遇到结束的双引号或文件结束
+		if l.ch == '"' || l.ch == 0 {
+			break
+		}
+		// 处理转义字符
+		if l.ch == '\\' {
+			l.readChar() // 跳过转义符后的字符
+		}
+	}
+	str := l.input[position:l.position]
+	l.readChar() // 跳过结束的 "
+	return str
 }
 
 // isLetter 检查字符是否为字母或下划线

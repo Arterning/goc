@@ -39,12 +39,16 @@ import (
 // Generator LLVM IR 代码生成器结构体
 // 负责遍历 AST 并生成对应的 LLVM IR 代码
 type Generator struct {
-	module      *ir.Module           // LLVM 模块（包含所有函数和全局变量）
-	builder     *ir.Block            // 当前正在构建的基本块
-	currentFunc *ir.Func             // 当前正在生成的函数
-	analyzer    *semantic.Analyzer   // 语义分析器（用于获取表达式类型）
-	variables   map[string]value.Value // 变量存储映射（变量名 -> alloca 指令）
-	functions   map[string]*ir.Func  // 函数映射（函数名 -> LLVM 函数）
+	module       *ir.Module             // LLVM 模块（包含所有函数和全局变量）
+	builder      *ir.Block              // 当前正在构建的基本块
+	currentFunc  *ir.Func               // 当前正在生成的函数
+	analyzer     *semantic.Analyzer     // 语义分析器（用于获取表达式类型）
+	variables    map[string]value.Value // 变量存储映射（变量名 -> alloca 指令）
+	functions    map[string]*ir.Func    // 函数映射（函数名 -> LLVM 函数）
+	stringCount  int                    // 字符串常量计数器
+	printfFunc   *ir.Func               // printf 函数声明
+	putsFunc     *ir.Func               // puts 函数声明
+	putcharFunc  *ir.Func               // putchar 函数声明
 }
 
 // New 创建一个新的代码生成器
@@ -59,16 +63,40 @@ func New(analyzer *semantic.Analyzer) *Generator {
 	}
 }
 
+// ========== C 标准库函数声明 ==========
+
+// declareCLibFunctions 声明 C 标准库函数
+// 声明 printf, puts, putchar 用于 print 功能
+func (g *Generator) declareCLibFunctions() {
+	// 声明 printf: int printf(ptr, ...)
+	// 用于格式化输出
+	g.printfFunc = g.module.NewFunc("printf", llvmTypes.I32,
+		ir.NewParam("format", llvmTypes.NewPointer(llvmTypes.I8)))
+	g.printfFunc.Sig.Variadic = true
+
+	// 声明 puts: int puts(ptr)
+	// 用于输出字符串（自动添加换行）
+	g.putsFunc = g.module.NewFunc("puts", llvmTypes.I32,
+		ir.NewParam("s", llvmTypes.NewPointer(llvmTypes.I8)))
+
+	// 声明 putchar: int putchar(int)
+	// 用于输出单个字符
+	g.putcharFunc = g.module.NewFunc("putchar", llvmTypes.I32,
+		ir.NewParam("c", llvmTypes.I32))
+}
+
 // ========== 代码生成入口 ==========
 
 // Generate 为整个程序生成 LLVM IR
 // 参数 program: 经过语义分析的 AST
 // 返回值: (LLVM 模块, 错误)
 //
-// 生成策略（两遍扫描）：
-// 第一遍：声明所有函数签名
+// 生成策略（三步）：
+// 第一步：声明 C 标准库函数（printf, puts, putchar）
+//   - 这样可以在代码中调用这些函数
+// 第二步：声明所有函数签名
 //   - 这样可以支持函数的前向引用
-// 第二遍：生成函数体
+// 第三步：生成函数体
 //   - 生成详细的 LLVM IR 指令
 //
 // 生成的 LLVM IR 特点：
@@ -76,14 +104,17 @@ func New(analyzer *semantic.Analyzer) *Generator {
 // - 每个变量对应一个栈上的内存位置
 // - 简化了代码生成，但可能不是最优的 IR
 func (g *Generator) Generate(program *parser.Program) (*ir.Module, error) {
-	// 第一遍：声明所有函数签名
+	// 第一步：声明 C 标准库函数
+	g.declareCLibFunctions()
+
+	// 第二步：声明所有函数签名
 	for _, fn := range program.Functions {
 		if err := g.declareFunctionSignature(fn); err != nil {
 			return nil, err
 		}
 	}
 
-	// 第二遍：生成函数体
+	// 第三步：生成函数体
 	for _, fn := range program.Functions {
 		if err := g.generateFunction(fn); err != nil {
 			return nil, err
@@ -362,6 +393,8 @@ func (g *Generator) generateExpression(expr parser.Expression) (value.Value, err
 		return constant.NewInt(llvmTypes.I32, e.Value), nil
 	case *parser.FloatLiteral:
 		return constant.NewFloat(llvmTypes.Float, e.Value), nil
+	case *parser.StringLiteral:
+		return g.generateStringConstant(e.Value), nil
 	case *parser.Identifier:
 		return g.generateIdentifier(e)
 	case *parser.BinaryExpr:
@@ -373,6 +406,26 @@ func (g *Generator) generateExpression(expr parser.Expression) (value.Value, err
 	default:
 		return nil, fmt.Errorf("unknown expression type")
 	}
+}
+
+// generateStringConstant generates a global string constant
+// 参数 str: 字符串内容
+// 返回值: 指向字符串常量的指针（i8*）
+func (g *Generator) generateStringConstant(str string) value.Value {
+	// 创建字符串常量名（例如：.str.0, .str.1, ...）
+	name := fmt.Sprintf(".str.%d", g.stringCount)
+	g.stringCount++
+
+	// 创建全局字符串常量（需要添加 \00 结尾）
+	strWithNull := str + "\x00"
+	arrayType := llvmTypes.NewArray(uint64(len(strWithNull)), llvmTypes.I8)
+	globalStr := g.module.NewGlobalDef(name, constant.NewCharArrayFromString(strWithNull))
+	globalStr.Linkage = enum.LinkagePrivate
+	globalStr.UnnamedAddr = enum.UnnamedAddrUnnamedAddr
+
+	// 返回指向字符串首元素的指针（getelementptr）
+	zero := constant.NewInt(llvmTypes.I64, 0)
+	return constant.NewGetElementPtr(arrayType, globalStr, zero, zero)
 }
 
 // generateIdentifier generates LLVM IR for an identifier
@@ -499,6 +552,11 @@ func (g *Generator) generateUnaryExpr(expr *parser.UnaryExpr) (value.Value, erro
 
 // generateCallExpr generates LLVM IR for a function call
 func (g *Generator) generateCallExpr(expr *parser.CallExpr) (value.Value, error) {
+	// 特殊处理内建的 print 函数
+	if expr.Function == "print" {
+		return g.generatePrintCall(expr)
+	}
+
 	fn, exists := g.functions[expr.Function]
 	if !exists {
 		return nil, fmt.Errorf("undefined function: %s", expr.Function)
@@ -514,6 +572,64 @@ func (g *Generator) generateCallExpr(expr *parser.CallExpr) (value.Value, error)
 	}
 
 	return g.builder.NewCall(fn, args...), nil
+}
+
+// generatePrintCall 生成 print 函数调用的 LLVM IR
+// print 是内建函数，根据参数类型自动选择调用 printf 或 puts
+func (g *Generator) generatePrintCall(expr *parser.CallExpr) (value.Value, error) {
+	if len(expr.Arguments) == 0 {
+		return nil, fmt.Errorf("print requires at least one argument")
+	}
+
+	// 生成第一个参数
+	firstArg, err := g.generateExpression(expr.Arguments[0])
+	if err != nil {
+		return nil, err
+	}
+
+	// 如果只有一个参数且是字符串，使用 puts
+	if len(expr.Arguments) == 1 {
+		if _, ok := expr.Arguments[0].(*parser.StringLiteral); ok {
+			return g.builder.NewCall(g.putsFunc, firstArg), nil
+		}
+		// 如果是整数，使用 printf 格式化输出
+		if _, ok := expr.Arguments[0].(*parser.IntLiteral); ok {
+			formatStr := g.generateStringConstant("%d\n")
+			return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+		}
+		// 如果是浮点数，使用 printf 格式化输出
+		if _, ok := expr.Arguments[0].(*parser.FloatLiteral); ok {
+			formatStr := g.generateStringConstant("%f\n")
+			return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+		}
+		// 对于变量，根据类型判断
+		if ident, ok := expr.Arguments[0].(*parser.Identifier); ok {
+			exprType := g.analyzer.GetExprType(ident)
+			if exprType.Equals(types.IntType) {
+				formatStr := g.generateStringConstant("%d\n")
+				return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+			} else if exprType.Equals(types.FloatType) {
+				formatStr := g.generateStringConstant("%f\n")
+				return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+			}
+		}
+	}
+
+	// 多个参数时，使用 printf（第一个参数必须是格式字符串）
+	if _, ok := expr.Arguments[0].(*parser.StringLiteral); ok {
+		var args []value.Value
+		args = append(args, firstArg)
+		for i := 1; i < len(expr.Arguments); i++ {
+			arg, err := g.generateExpression(expr.Arguments[i])
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, arg)
+		}
+		return g.builder.NewCall(g.printfFunc, args...), nil
+	}
+
+	return nil, fmt.Errorf("unsupported print arguments")
 }
 
 // getLLVMType converts a type string to an LLVM type

@@ -50,6 +50,7 @@ type Statement interface {
 // 实现这个接口的节点：
 // - IntLiteral: 整数字面量
 // - FloatLiteral: 浮点数字面量
+// - StringLiteral: 字符串字面量
 // - Identifier: 标识符
 // - BinaryExpr: 二元运算
 // - UnaryExpr: 一元运算
@@ -341,6 +342,20 @@ type FloatLiteral struct {
 
 func (fl *FloatLiteral) expressionNode()      {}
 func (fl *FloatLiteral) TokenLiteral() string { return fl.Token.Literal }
+
+// StringLiteral 表示字符串字面量
+// 存储字符串常量的值
+//
+// 例如：
+//   "hello"        -> StringLiteral{Value: "hello"}
+//   "Hello, World!" -> StringLiteral{Value: "Hello, World!"}
+type StringLiteral struct {
+	Value string      // 字符串值
+	Token lexer.Token // 关联的 Token
+}
+
+func (sl *StringLiteral) expressionNode()      {}
+func (sl *StringLiteral) TokenLiteral() string { return sl.Token.Literal }
 
 // Identifier 表示标识符（变量名、函数名等）
 // 标识符是对已声明的变量或函数的引用

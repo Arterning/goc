@@ -1,0 +1,21 @@
+// Test print functionality
+int main() {
+    // Print string
+    print("Hello, World!")
+
+    // Print integer
+    x = 88
+    print(x)
+
+    // Print multiple values with format
+    y = 100
+    print("The answer is: %d", y)
+
+    func()
+
+    return 0
+}
+
+int func() {
+    print("Finished")
+}

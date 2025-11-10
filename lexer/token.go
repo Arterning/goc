@@ -23,6 +23,9 @@ const (
 	// FLOAT_LIT 表示浮点数字面量
 	// 例如：3.14, 2.5, 0.1
 	FLOAT_LIT
+	// STRING_LIT 表示字符串字面量
+	// 例如："hello", "world", "Hello, World!"
+	STRING_LIT
 
 	// ========== 算术运算符 ==========
 	// ASSIGN 表示赋值运算符 =
@@ -149,6 +152,8 @@ func (t TokenType) String() string {
 		return "INT_LIT"
 	case FLOAT_LIT:
 		return "FLOAT_LIT"
+	case STRING_LIT:
+		return "STRING_LIT"
 	case ASSIGN:
 		return "="
 	case PLUS:

@@ -499,6 +499,8 @@ func (p *Parser) parsePrefixExpression() Expression {
 		return p.parseIntLiteral()
 	case lexer.FLOAT_LIT:
 		return p.parseFloatLiteral()
+	case lexer.STRING_LIT:
+		return p.parseStringLiteral()
 	case lexer.MINUS, lexer.NOT:
 		return p.parseUnaryExpr()
 	case lexer.LPAREN:
@@ -531,6 +533,11 @@ func (p *Parser) parseFloatLiteral() *FloatLiteral {
 	}
 	lit.Value = value
 	return lit
+}
+
+// parseStringLiteral parses a string literal
+func (p *Parser) parseStringLiteral() *StringLiteral {
+	return &StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
 
 // parseUnaryExpr parses a unary expression
