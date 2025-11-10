@@ -145,7 +145,7 @@ func (a *Analyzer) error(msg string) {
 
 // ========== 分析入口 ==========
 
-// Analyze 对整个程序进行语义分析
+// Analyze 对整个程序进行语义分析（单文件编译）
 // 参数 program: 语法分析生成的 AST
 // 返回值: true 表示分析成功，false 表示有错误
 //
@@ -173,6 +173,30 @@ func (a *Analyzer) Analyze(program *parser.Program) bool {
 
 	// 返回是否有错误
 	return len(a.errors) == 0
+}
+
+// DeclareFunctionFromExternal 从外部声明函数（用于多文件编译）
+// 参数 fn: 函数声明节点
+// 这个方法只声明函数，不分析函数体
+func (a *Analyzer) DeclareFunctionFromExternal(fn *parser.FunctionDecl) {
+	a.analyzeFunctionDecl(fn)
+}
+
+// AnalyzeFunctions 分析函数体（用于多文件编译）
+// 参数 program: 语法分析生成的 AST
+// 返回值: true 表示分析成功，false 表示有错误
+// 注意：假设所有函数声明已经通过 DeclareFunctionFromExternal 收集
+func (a *Analyzer) AnalyzeFunctions(program *parser.Program) bool {
+	// 清空之前的错误（如果有）
+	startErrorCount := len(a.errors)
+
+	// 分析所有函数体
+	for _, fn := range program.Functions {
+		a.analyzeFunctionBody(fn)
+	}
+
+	// 只返回本次分析是否有新错误
+	return len(a.errors) == startErrorCount
 }
 
 // analyzeFunctionDecl analyzes a function declaration

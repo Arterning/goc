@@ -165,7 +165,8 @@ func (g *Generator) generateFunction(fn *parser.FunctionDecl) error {
 	for i, param := range fn.Parameters {
 		paramType, _ := g.getLLVMType(param.Type)
 		alloca := entry.NewAlloca(paramType)
-		alloca.LocalIdent = ir.NewLocalIdent(param.Name)
+		// 不要给 alloca 指定名字，避免与参数名冲突
+		// alloca.LocalIdent = ir.NewLocalIdent(param.Name)
 		entry.NewStore(llvmFunc.Params[i], alloca)
 		g.variables[param.Name] = alloca
 	}
@@ -230,7 +231,8 @@ func (g *Generator) generateVarDeclStmt(stmt *parser.VarDeclStmt) error {
 
 	// Allocate storage
 	alloca := g.builder.NewAlloca(llvmType)
-	alloca.LocalIdent = ir.NewLocalIdent(stmt.Name)
+	// 让 LLVM 自动生成唯一的变量名，避免冲突
+	// alloca.LocalIdent = ir.NewLocalIdent(stmt.Name)
 	g.variables[stmt.Name] = alloca
 
 	// Initialize if value provided
@@ -264,7 +266,8 @@ func (g *Generator) generateAssignStmt(stmt *parser.AssignStmt) error {
 			return err
 		}
 		newAlloca := g.builder.NewAlloca(llvmType)
-		newAlloca.LocalIdent = ir.NewLocalIdent(stmt.Name)
+		// 让 LLVM 自动生成唯一的变量名
+		// newAlloca.LocalIdent = ir.NewLocalIdent(stmt.Name)
 		alloca = newAlloca
 		g.variables[stmt.Name] = alloca
 	}

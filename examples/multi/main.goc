@@ -1,0 +1,30 @@
+// main.goc - 主程序
+// 演示跨文件函数调用
+
+int main() {
+    print("Multi-file Compilation Demo")
+    printSeparator()
+
+    // 调用 math.goc 中的函数
+    a = 10
+    b = 20
+    sum = add(a, b)
+    print("add(10, 20) = %d", sum)
+
+    product = multiply(5, 6)
+    print("multiply(5, 6) = %d", product)
+
+    fact = factorial(5)
+    print("factorial(5) = %d", fact)
+
+    printSeparator()
+
+    // 调用 utils.goc 中的函数
+    printSquare(7)
+    printSquare(12)
+
+    printSeparator()
+    print("Done!")
+
+    return 0
+}

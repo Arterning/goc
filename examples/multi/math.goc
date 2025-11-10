@@ -1,0 +1,19 @@
+// math.goc - 数学工具函数库
+
+// 计算两个数的和
+int add(int a, int b) {
+    return a + b
+}
+
+// 计算两个数的乘积
+int multiply(int a, int b) {
+    return a * b
+}
+
+// 计算阶乘
+int factorial(int n) {
+    if (n <= 1) {
+        return 1
+    }
+    return n * factorial(n - 1)
+}

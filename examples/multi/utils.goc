@@ -1,0 +1,13 @@
+// utils.goc - 通用工具函数
+
+// 打印分隔线
+int printSeparator() {
+    print("====================")
+    return 0
+}
+
+// 打印数字及其平方
+int printSquare(int n) {
+    print("%d squared is %d", n, n * n)
+    return 0
+}

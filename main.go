@@ -35,24 +35,34 @@ import (
 func main() {
 	// 检查命令行参数
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: goc <source-file>")
+		fmt.Println("Usage: goc <source-file> [source-file2] ...")
 		fmt.Println("Example: goc program.goc")
+		fmt.Println("         goc main.goc utils.goc math.goc")
 		os.Exit(1)
 	}
 
-	sourceFile := os.Args[1]
+	sourceFiles := os.Args[1:]
 
-	// 读取源文件内容
-	source, err := os.ReadFile(sourceFile)
-	if err != nil {
-		fmt.Printf("Error reading file: %v\n", err)
-		os.Exit(1)
-	}
+	// 检查是否为多文件编译
+	if len(sourceFiles) == 1 {
+		// 单文件编译（保持原有行为）
+		sourceFile := sourceFiles[0]
+		source, err := os.ReadFile(sourceFile)
+		if err != nil {
+			fmt.Printf("Error reading file: %v\n", err)
+			os.Exit(1)
+		}
 
-	// 执行编译
-	if err := compile(string(source), sourceFile); err != nil {
-		fmt.Printf("Compilation failed: %v\n", err)
-		os.Exit(1)
+		if err := compile(string(source), sourceFile); err != nil {
+			fmt.Printf("Compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+	} else {
+		// 多文件编译
+		if err := compileMultipleFiles(sourceFiles); err != nil {
+			fmt.Printf("Compilation failed: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	fmt.Println("Compilation successful!")
@@ -171,5 +181,148 @@ func compile(source string, sourceFile string) error {
 	}
 
 	fmt.Printf("Executable created: %s\n", objFile)
+	return nil
+}
+
+// compileMultipleFiles 编译多个源文件并链接
+// 参数 sourceFiles: 源文件路径列表
+// 返回值: 编译错误（如果有）
+//
+// 编译流程：
+// 1. 解析所有文件，收集 AST
+// 2. 全局语义分析（收集所有函数声明）
+// 3. 为每个文件生成 LLVM IR
+// 4. 使用 zig cc 将所有 LLVM IR 文件链接成一个可执行文件
+func compileMultipleFiles(sourceFiles []string) error {
+	fmt.Println("=== Multi-file Compilation ===")
+	fmt.Printf("Compiling %d files...\n", len(sourceFiles))
+
+	// 存储每个文件的 AST 和文件名
+	type FileInfo struct {
+		fileName string
+		program  *parser.Program
+	}
+	var fileInfos []FileInfo
+
+	// 阶段 1: 解析所有文件
+	fmt.Println("\n=== Phase 1: Parsing ===")
+	for _, sourceFile := range sourceFiles {
+		fmt.Printf("Parsing %s...\n", sourceFile)
+
+		// 读取源文件
+		source, err := os.ReadFile(sourceFile)
+		if err != nil {
+			return fmt.Errorf("error reading file %s: %v", sourceFile, err)
+		}
+
+		// 词法分析
+		lex := lexer.New(string(source))
+
+		// 语法分析
+		p := parser.New(lex)
+		program := p.ParseProgram()
+
+		if len(p.Errors()) > 0 {
+			fmt.Printf("Parser errors in %s:\n", sourceFile)
+			for _, err := range p.Errors() {
+				fmt.Printf("  %s\n", err)
+			}
+			return fmt.Errorf("parsing failed for %s", sourceFile)
+		}
+
+		fileInfos = append(fileInfos, FileInfo{
+			fileName: sourceFile,
+			program:  program,
+		})
+	}
+	fmt.Println("All files parsed successfully")
+
+	// 阶段 2: 全局语义分析
+	fmt.Println("\n=== Phase 2: Semantic Analysis ===")
+
+	// 创建全局语义分析器
+	globalAnalyzer := semantic.New()
+
+	// 第一遍：收集所有文件的函数声明
+	fmt.Println("Collecting function declarations...")
+	for _, info := range fileInfos {
+		for _, fn := range info.program.Functions {
+			globalAnalyzer.DeclareFunctionFromExternal(fn)
+		}
+	}
+
+	// 第二遍：分析每个文件的函数体
+	fmt.Println("Analyzing function bodies...")
+	for _, info := range fileInfos {
+		fmt.Printf("  Analyzing %s...\n", info.fileName)
+		if !globalAnalyzer.AnalyzeFunctions(info.program) {
+			fmt.Printf("Semantic errors in %s:\n", info.fileName)
+			for _, err := range globalAnalyzer.Errors() {
+				fmt.Printf("  %s\n", err)
+			}
+			return fmt.Errorf("semantic analysis failed for %s", info.fileName)
+		}
+	}
+	fmt.Println("Semantic analysis successful")
+
+	// 阶段 3: 代码生成
+	fmt.Println("\n=== Phase 3: Code Generation ===")
+
+	// 合并所有程序的函数为一个大程序
+	mergedProgram := &parser.Program{
+		Functions: []*parser.FunctionDecl{},
+	}
+	for _, info := range fileInfos {
+		mergedProgram.Functions = append(mergedProgram.Functions, info.program.Functions...)
+	}
+
+	// 为合并的程序生成一个 LLVM IR 模块
+	fmt.Println("Generating unified LLVM IR module...")
+	gen := codegen.New(globalAnalyzer)
+	module, err := gen.Generate(mergedProgram)
+	if err != nil {
+		return fmt.Errorf("code generation failed: %v", err)
+	}
+
+	// 写入单个 LLVM IR 文件
+	baseName := strings.TrimSuffix(sourceFiles[0], filepath.Ext(sourceFiles[0]))
+	llFile := baseName + ".ll"
+
+	llvmIR := module.String()
+	if err := os.WriteFile(llFile, []byte(llvmIR), 0644); err != nil {
+		return fmt.Errorf("failed to write LLVM IR: %v", err)
+	}
+	fmt.Printf("LLVM IR written to %s\n", llFile)
+
+	// 阶段 4: 编译为可执行文件
+	fmt.Println("\n=== Compiling to executable ===")
+
+	// 创建 Zig 编译器实例
+	zigCompiler, err := backend.NewZigCompiler()
+	if err != nil {
+		return fmt.Errorf("failed to initialize zig compiler: %v", err)
+	}
+
+	// 确定输出文件名（使用第一个源文件的名字）
+	outputFile := baseName
+	if runtime.GOOS == "windows" {
+		outputFile += ".exe"
+	}
+
+	// 编译选项
+	opts := backend.CompileOptions{
+		InputFile:  llFile,
+		OutputFile: outputFile,
+		TargetOS:   runtime.GOOS,
+		TargetArch: runtime.GOARCH,
+		Optimize:   true,
+	}
+
+	// 使用 zig cc 编译
+	if err := zigCompiler.Compile(opts); err != nil {
+		return fmt.Errorf("compilation failed: %v", err)
+	}
+
+	fmt.Printf("Executable created: %s\n", outputFile)
 	return nil
 }

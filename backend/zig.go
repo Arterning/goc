@@ -10,13 +10,22 @@ import (
 	"runtime"
 )
 
-// CompileOptions 编译选项
+// CompileOptions 编译选项（单文件编译）
 type CompileOptions struct {
 	InputFile  string // 输入的 LLVM IR 文件路径
 	OutputFile string // 输出的可执行文件路径
 	TargetOS   string // 目标操作系统 (windows/linux/darwin)
 	TargetArch string // 目标架构 (x86_64/aarch64)
 	Optimize   bool   // 是否开启优化
+}
+
+// LinkOptions 链接选项（多文件链接）
+type LinkOptions struct {
+	InputFiles []string // 输入的 LLVM IR 文件路径列表
+	OutputFile string   // 输出的可执行文件路径
+	TargetOS   string   // 目标操作系统 (windows/linux/darwin)
+	TargetArch string   // 目标架构 (x86_64/aarch64)
+	Optimize   bool     // 是否开启优化
 }
 
 // ZigCompiler Zig 编译器封装
@@ -75,6 +84,47 @@ func (z *ZigCompiler) Compile(opts CompileOptions) error {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("zig compilation failed: %v\nOutput: %s", err, string(output))
+	}
+
+	return nil
+}
+
+// Link 链接多个 LLVM IR 文件为可执行文件
+// 使用 zig cc 命令链接多个文件
+func (z *ZigCompiler) Link(opts LinkOptions) error {
+	// 设置默认值
+	if opts.TargetOS == "" {
+		opts.TargetOS = runtime.GOOS
+	}
+	if opts.TargetArch == "" {
+		opts.TargetArch = runtime.GOARCH
+	}
+
+	// 构建 zig cc 命令
+	args := []string{"cc"}
+
+	// 添加所有输入文件
+	args = append(args, opts.InputFiles...)
+
+	// 输出文件
+	args = append(args, "-o", opts.OutputFile)
+
+	// 添加目标平台参数
+	target := z.buildTargetTriple(opts.TargetOS, opts.TargetArch)
+	if target != "" {
+		args = append(args, "-target", target)
+	}
+
+	// 添加优化选项
+	if opts.Optimize {
+		args = append(args, "-O2")
+	}
+
+	// 执行 zig cc 命令
+	cmd := exec.Command(z.zigPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("zig linking failed: %v\nOutput: %s", err, string(output))
 	}
 
 	return nil
