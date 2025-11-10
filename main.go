@@ -2,7 +2,7 @@
 // GoC 是一个类 C 语言编译器，使用 Go 语言编写，LLVM 作为后端
 //
 // 编译流程：
-// 源代码 -> 词法分析 -> 语法分析 -> 语义分析 -> 代码生成 -> LLVM IR -> Clang -> 可执行文件
+// 源代码 -> 词法分析 -> 语法分析 -> 语义分析 -> 代码生成 -> LLVM IR -> Zig -> 可执行文件
 //
 // 使用方法：
 //   goc <source-file>
@@ -15,13 +15,14 @@ package main
 
 import (
 	"fmt"
+	"goc/backend"
 	"goc/codegen"
 	"goc/lexer"
 	"goc/parser"
 	"goc/semantic"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -87,7 +88,7 @@ func main() {
 // 5. 后端编译（Backend Compilation）
 //    输入：LLVM IR
 //    输出：可执行文件
-//    工具：Clang（LLVM 的 C 编译器）
+//    工具：Zig（嵌入式 LLVM 编译器，支持交叉编译）
 func compile(source string, sourceFile string) error {
 	// ========== 阶段 1: 词法分析 ==========
 	fmt.Println("=== Lexical Analysis ===")
@@ -140,16 +141,33 @@ func compile(source string, sourceFile string) error {
 	fmt.Printf("LLVM IR written to %s\n", llFile)
 
 	// ========== 阶段 5: 后端编译 ==========
-	// 使用 Clang 将 LLVM IR 编译为可执行文件
+	// 使用 Zig 将 LLVM IR 编译为可执行文件
 	fmt.Println("=== Compiling to executable ===")
-	objFile := baseName + ".exe"
 
-	// 调用系统命令：clang hello.ll -o hello.exe
-	cmd := exec.Command("clang", llFile, "-o", objFile)
-	output, err := cmd.CombinedOutput()
+	// 创建 Zig 编译器实例
+	zigCompiler, err := backend.NewZigCompiler()
 	if err != nil {
-		fmt.Printf("Clang output: %s\n", string(output))
-		return fmt.Errorf("failed to compile with clang: %v", err)
+		return fmt.Errorf("failed to initialize zig compiler: %v", err)
+	}
+
+	// 确定输出文件名（根据平台添加合适的扩展名）
+	objFile := baseName
+	if runtime.GOOS == "windows" {
+		objFile += ".exe"
+	}
+
+	// 编译选项
+	opts := backend.CompileOptions{
+		InputFile:  llFile,
+		OutputFile: objFile,
+		TargetOS:   runtime.GOOS,   // 当前操作系统
+		TargetArch: runtime.GOARCH, // 当前架构
+		Optimize:   true,           // 启用优化
+	}
+
+	// 使用 zig cc 编译 LLVM IR
+	if err := zigCompiler.Compile(opts); err != nil {
+		return fmt.Errorf("zig compilation failed: %v", err)
 	}
 
 	fmt.Printf("Executable created: %s\n", objFile)

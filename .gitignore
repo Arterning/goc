@@ -1,2 +1,9 @@
 *.ll
 *.exe
+*.asm
+*.pdb
+
+# 排除 zig 编译器二进制文件（外部依赖）
+backend/binaries/zig-*
+
+
