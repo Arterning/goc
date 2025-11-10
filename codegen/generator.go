@@ -124,6 +124,39 @@ func (g *Generator) Generate(program *parser.Program) (*ir.Module, error) {
 	return g.module, nil
 }
 
+// DeclareExternalFunction 声明外部函数（用于多文件编译）
+// 参数 name: 函数名
+// 参数 returnType: 返回类型
+// 参数 paramTypes: 参数类型列表
+func (g *Generator) DeclareExternalFunction(name string, returnType string, paramTypes []string) error {
+	// 检查函数是否已经声明
+	if _, exists := g.functions[name]; exists {
+		return nil // 已经声明过了
+	}
+
+	// 获取返回类型
+	retType, err := g.getLLVMType(returnType)
+	if err != nil {
+		return err
+	}
+
+	// 获取参数类型
+	var params []*ir.Param
+	for i, paramType := range paramTypes {
+		pType, err := g.getLLVMType(paramType)
+		if err != nil {
+			return err
+		}
+		params = append(params, ir.NewParam(fmt.Sprintf("arg%d", i), pType))
+	}
+
+	// 声明函数（不定义函数体）
+	llvmFunc := g.module.NewFunc(name, retType, params...)
+	g.functions[name] = llvmFunc
+
+	return nil
+}
+
 // declareFunctionSignature declares a function signature
 func (g *Generator) declareFunctionSignature(fn *parser.FunctionDecl) error {
 	// Get return type

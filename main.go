@@ -268,34 +268,79 @@ func compileMultipleFiles(sourceFiles []string) error {
 	// 阶段 3: 代码生成
 	fmt.Println("\n=== Phase 3: Code Generation ===")
 
-	// 合并所有程序的函数为一个大程序
-	mergedProgram := &parser.Program{
-		Functions: []*parser.FunctionDecl{},
+	// 收集所有函数的信息（用于外部函数声明）
+	type FuncInfo struct {
+		name       string
+		returnType string
+		paramTypes []string
+		fileName   string
 	}
+	allFunctions := make(map[string]*FuncInfo)
+
 	for _, info := range fileInfos {
-		mergedProgram.Functions = append(mergedProgram.Functions, info.program.Functions...)
+		for _, fn := range info.program.Functions {
+			paramTypes := make([]string, len(fn.Parameters))
+			for i, param := range fn.Parameters {
+				paramTypes[i] = param.Type
+			}
+			allFunctions[fn.Name] = &FuncInfo{
+				name:       fn.Name,
+				returnType: fn.ReturnType,
+				paramTypes: paramTypes,
+				fileName:   info.fileName,
+			}
+		}
 	}
 
-	// 为合并的程序生成一个 LLVM IR 模块
-	fmt.Println("Generating unified LLVM IR module...")
-	gen := codegen.New(globalAnalyzer)
-	module, err := gen.Generate(mergedProgram)
-	if err != nil {
-		return fmt.Errorf("code generation failed: %v", err)
+	var llFiles []string
+
+	// 为每个文件生成独立的 LLVM IR
+	for _, info := range fileInfos {
+		fmt.Printf("Generating code for %s...\n", info.fileName)
+
+		gen := codegen.New(globalAnalyzer)
+
+		// 声明所有外部函数（在其他文件中定义的函数）
+		for funcName, funcInfo := range allFunctions {
+			// 检查这个函数是否在当前文件中定义
+			isLocalFunc := false
+			for _, fn := range info.program.Functions {
+				if fn.Name == funcName {
+					isLocalFunc = true
+					break
+				}
+			}
+
+			// 如果不在当前文件，声明为外部函数
+			if !isLocalFunc {
+				err := gen.DeclareExternalFunction(funcInfo.name, funcInfo.returnType, funcInfo.paramTypes)
+				if err != nil {
+					return fmt.Errorf("failed to declare external function %s: %v", funcInfo.name, err)
+				}
+			}
+		}
+
+		// 生成当前文件的 LLVM IR
+		module, err := gen.Generate(info.program)
+		if err != nil {
+			return fmt.Errorf("code generation failed for %s: %v", info.fileName, err)
+		}
+
+		// 写入 LLVM IR 文件
+		baseName := strings.TrimSuffix(info.fileName, filepath.Ext(info.fileName))
+		llFile := baseName + ".ll"
+
+		llvmIR := module.String()
+		if err := os.WriteFile(llFile, []byte(llvmIR), 0644); err != nil {
+			return fmt.Errorf("failed to write LLVM IR for %s: %v", info.fileName, err)
+		}
+		fmt.Printf("  LLVM IR written to %s\n", llFile)
+
+		llFiles = append(llFiles, llFile)
 	}
 
-	// 写入单个 LLVM IR 文件
-	baseName := strings.TrimSuffix(sourceFiles[0], filepath.Ext(sourceFiles[0]))
-	llFile := baseName + ".ll"
-
-	llvmIR := module.String()
-	if err := os.WriteFile(llFile, []byte(llvmIR), 0644); err != nil {
-		return fmt.Errorf("failed to write LLVM IR: %v", err)
-	}
-	fmt.Printf("LLVM IR written to %s\n", llFile)
-
-	// 阶段 4: 编译为可执行文件
-	fmt.Println("\n=== Compiling to executable ===")
+	// 阶段 4: 链接所有 LLVM IR 文件
+	fmt.Println("\n=== Linking ===")
 
 	// 创建 Zig 编译器实例
 	zigCompiler, err := backend.NewZigCompiler()
@@ -304,23 +349,24 @@ func compileMultipleFiles(sourceFiles []string) error {
 	}
 
 	// 确定输出文件名（使用第一个源文件的名字）
+	baseName := strings.TrimSuffix(sourceFiles[0], filepath.Ext(sourceFiles[0]))
 	outputFile := baseName
 	if runtime.GOOS == "windows" {
 		outputFile += ".exe"
 	}
 
-	// 编译选项
-	opts := backend.CompileOptions{
-		InputFile:  llFile,
+	// 链接选项
+	opts := backend.LinkOptions{
+		InputFiles: llFiles,
 		OutputFile: outputFile,
 		TargetOS:   runtime.GOOS,
 		TargetArch: runtime.GOARCH,
 		Optimize:   true,
 	}
 
-	// 使用 zig cc 编译
-	if err := zigCompiler.Compile(opts); err != nil {
-		return fmt.Errorf("compilation failed: %v", err)
+	// 使用 zig cc 链接所有 LLVM IR 文件
+	if err := zigCompiler.Link(opts); err != nil {
+		return fmt.Errorf("linking failed: %v", err)
 	}
 
 	fmt.Printf("Executable created: %s\n", outputFile)
