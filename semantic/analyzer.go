@@ -133,6 +133,22 @@ func (a *Analyzer) GetExprType(expr parser.Expression) types.Type {
 	return a.exprTypes[expr]
 }
 
+// GetVarType 获取变量的类型
+// 参数 name: 变量名
+// 返回值: 变量的类型
+//
+// 用途：代码生成阶段需要知道变量的类型
+func (a *Analyzer) GetVarType(name string) types.Type {
+	if sym, ok := a.currentScope.Lookup(name); ok {
+		return sym.Type
+	}
+	// 如果在当前作用域找不到，尝试在全局作用域查找
+	if sym, ok := a.globalScope.Lookup(name); ok {
+		return sym.Type
+	}
+	return nil
+}
+
 // error 记录错误信息
 func (a *Analyzer) error(msg string) {
 	a.errors = append(a.errors, msg)

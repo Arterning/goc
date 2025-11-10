@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir \"C:\\Users\\ningh\\Desktop\\coding\\goc\")"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
