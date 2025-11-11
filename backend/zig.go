@@ -68,6 +68,13 @@ func (z *ZigCompiler) Compile(opts CompileOptions) error {
 		"-o", opts.OutputFile, // 输出文件
 	}
 
+	// 添加字符串运行时库
+	// 检查 runtime/string.c 是否存在，如果存在则链接
+	stringRuntimePath := "runtime/string.c"
+	if _, err := os.Stat(stringRuntimePath); err == nil {
+		args = append(args, stringRuntimePath)
+	}
+
 	// 添加目标平台参数
 	target := z.buildTargetTriple(opts.TargetOS, opts.TargetArch)
 	if target != "" {
@@ -105,6 +112,13 @@ func (z *ZigCompiler) Link(opts LinkOptions) error {
 
 	// 添加所有输入文件
 	args = append(args, opts.InputFiles...)
+
+	// 添加字符串运行时库
+	// 检查 runtime/string.c 是否存在，如果存在则链接
+	stringRuntimePath := "runtime/string.c"
+	if _, err := os.Stat(stringRuntimePath); err == nil {
+		args = append(args, stringRuntimePath)
+	}
 
 	// 输出文件
 	args = append(args, "-o", opts.OutputFile)

@@ -1,0 +1,45 @@
+// string_test.goc - 测试字符串类型的各种功能
+
+int main() {
+    // 测试 1: 显式类型声明
+    str greeting = "Hello"
+    print(greeting)
+
+    // 测试 2: 类型推断
+    msg = "World"
+    print(msg)
+
+    // 测试 3: 字符串连接
+    result = greeting + " " + msg
+    print(result)
+
+    // 测试 4: 字符串比较（相等）
+    str a = "hello"
+    str b = "hello"
+    if (a == b) {
+        print("Strings are equal")
+    }
+
+    // 测试 5: 字符串比较（不等）
+    str c = "foo"
+    str d = "bar"
+    if (c != d) {
+        print("Strings are not equal")
+    }
+
+    // 测试 6: 混合使用字符串和其他类型
+    str name = "Alice"
+    int age = 25
+    print("Name:")
+    print(name)
+    print("Age:")
+    print(age)
+
+    // 测试 7: 复杂的字符串连接
+    str first = "Go"
+    str second = "C"
+    str lang = first + second + " Language"
+    print(lang)
+
+    return 0
+}

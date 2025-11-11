@@ -1,0 +1,12 @@
+// str_concat.goc - 测试字符串连接
+
+int main() {
+    str a = "Hello"
+    str b = " "
+    str c = "World"
+
+    result = a + b + c
+    print(result)
+
+    return 0
+}

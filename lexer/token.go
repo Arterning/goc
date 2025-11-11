@@ -82,6 +82,8 @@ const (
 	INT
 	// FLOAT 表示浮点数类型关键字 float
 	FLOAT
+	// STR 表示字符串类型关键字 str
+	STR
 	// RETURN 表示返回语句关键字 return
 	RETURN
 	// IF 表示条件语句关键字 if
@@ -98,6 +100,7 @@ const (
 var keywords = map[string]TokenType{
 	"int":    INT,    // 整数类型
 	"float":  FLOAT,  // 浮点数类型
+	"str":    STR,    // 字符串类型
 	"return": RETURN, // 返回语句
 	"if":     IF,     // 条件判断
 	"else":   ELSE,   // 条件分支
@@ -200,6 +203,8 @@ func (t TokenType) String() string {
 		return "int"
 	case FLOAT:
 		return "float"
+	case STR:
+		return "str"
 	case RETURN:
 		return "return"
 	case IF:

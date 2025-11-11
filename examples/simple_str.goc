@@ -1,0 +1,7 @@
+// simple_str.goc - 最简单的字符串测试
+
+int main() {
+    str msg = "Hello World"
+    print(msg)
+    return 0
+}

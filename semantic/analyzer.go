@@ -364,9 +364,9 @@ func (a *Analyzer) analyzeExpression(expr parser.Expression) types.Type {
 		a.exprTypes[expr] = types.FloatType
 		return types.FloatType
 	case *parser.StringLiteral:
-		// 字符串字面量类型（暂时用 IntType 作为占位符）
-		a.exprTypes[expr] = types.IntType
-		return types.IntType
+		// 字符串字面量类型
+		a.exprTypes[expr] = types.StringType
+		return types.StringType
 	case *parser.Identifier:
 		return a.analyzeIdentifier(e)
 	case *parser.BinaryExpr:

@@ -7,6 +7,7 @@
 // 本编译器支持的类型：
 // - int: 32 位整数
 // - float: 32 位浮点数
+// - str: 字符串类型（结构体：data指针 + length）
 // - void: 空类型（用于无返回值的函数）
 package types
 
@@ -43,25 +44,28 @@ func (bt *BasicType) Equals(other Type) bool {
 // 这样可以使用指针比较来检查类型相等
 
 var (
-	IntType   = &BasicType{Name: "int"}   // 32 位整数类型
-	FloatType = &BasicType{Name: "float"} // 32 位浮点数类型
-	VoidType  = &BasicType{Name: "void"}  // 空类型（无返回值）
+	IntType    = &BasicType{Name: "int"}   // 32 位整数类型
+	FloatType  = &BasicType{Name: "float"} // 32 位浮点数类型
+	StringType = &BasicType{Name: "str"}   // 字符串类型（data指针 + length）
+	VoidType   = &BasicType{Name: "void"}  // 空类型（无返回值）
 )
 
 // ========== 类型转换和查询函数 ==========
 
 // FromString 将字符串转换为 Type
-// 参数 s: 类型字符串（"int", "float", "void"）
+// 参数 s: 类型字符串（"int", "float", "str", "void"）
 // 返回值: 对应的 Type，如果无法识别则返回 nil
 //
 // 用途：解析源代码中的类型声明
-// 例如："int x" 中的 "int" -> IntType
+// 例如："int x" 中的 "int" -> IntType, "str s" 中的 "str" -> StringType
 func FromString(s string) Type {
 	switch s {
 	case "int":
 		return IntType
 	case "float":
 		return FloatType
+	case "str":
+		return StringType
 	case "void":
 		return VoidType
 	default:
@@ -70,17 +74,20 @@ func FromString(s string) Type {
 }
 
 // InferFromLiteral 从字面量推断类型
-// 参数 tokenType: Token 类型字符串（"INT_LIT", "FLOAT_LIT"）
+// 参数 tokenType: Token 类型字符串（"INT_LIT", "FLOAT_LIT", "STRING_LIT"）
 // 返回值: 推断出的 Type
 //
 // 用途：类型推断功能
 // 例如："x = 42" 中，从 42（INT_LIT）推断 x 为 int 类型
+//      "s = \"hello\"" 中，从 "hello"（STRING_LIT）推断 s 为 str 类型
 func InferFromLiteral(tokenType string) Type {
 	switch tokenType {
 	case "INT_LIT":
 		return IntType
 	case "FLOAT_LIT":
 		return FloatType
+	case "STRING_LIT":
+		return StringType
 	default:
 		return nil
 	}
@@ -125,17 +132,40 @@ func CanAssign(to, from Type) bool {
 // 1. 操作数类型必须完全匹配（不支持隐式转换）
 // 2. 比较运算符（==, !=, <, <=, >, >=）返回 int 类型（0 或 1）
 // 3. 算术和逻辑运算符返回操作数的类型
+// 4. 字符串类型特殊规则：
+//    - 支持 + 运算符（字符串连接）-> 返回 str
+//    - 支持 ==、!= 运算符（字符串比较）-> 返回 int
+//    - 不支持其他运算符
 //
 // 例如：
-// - 1 + 2        -> int（算术运算，返回操作数类型）
-// - 3.14 * 2.0   -> float（算术运算，返回操作数类型）
-// - x > 10       -> int（比较运算，总是返回 int）
-// - 1 + 3.14     -> ERROR（类型不匹配）
+// - 1 + 2            -> int（算术运算，返回操作数类型）
+// - 3.14 * 2.0       -> float（算术运算，返回操作数类型）
+// - x > 10           -> int（比较运算，总是返回 int）
+// - "a" + "b"        -> str（字符串连接）
+// - "a" == "b"       -> int（字符串比较）
+// - "a" < "b"        -> ERROR（字符串不支持顺序比较）
+// - 1 + 3.14         -> ERROR（类型不匹配）
 func GetBinaryOpResultType(left, right Type, op string) (Type, error) {
 	// 检查操作数类型是否匹配
 	if !left.Equals(right) {
 		return nil, &TypeError{
 			Message: "type mismatch in binary operation: " + left.String() + " and " + right.String(),
+		}
+	}
+
+	// 字符串类型的特殊处理
+	if left.Equals(StringType) {
+		switch op {
+		case "+":
+			// 字符串连接，返回字符串类型
+			return StringType, nil
+		case "==", "!=":
+			// 字符串比较，返回 int 类型
+			return IntType, nil
+		default:
+			return nil, &TypeError{
+				Message: "unsupported operator for string type: " + op + " (only +, ==, != are supported)",
+			}
 		}
 	}
 

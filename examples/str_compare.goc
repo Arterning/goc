@@ -1,0 +1,17 @@
+// str_compare.goc - 测试字符串比较
+
+int main() {
+    str a = "hello"
+    str b = "hello"
+    str c = "world"
+
+    if (a == b) {
+        print("Equal test passed")
+    }
+
+    if (a != c) {
+        print("Not equal test passed")
+    }
+
+    return 0
+}

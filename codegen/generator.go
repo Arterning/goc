@@ -46,20 +46,32 @@ type Generator struct {
 	variables    map[string]value.Value // 变量存储映射（变量名 -> alloca 指令）
 	functions    map[string]*ir.Func    // 函数映射（函数名 -> LLVM 函数）
 	stringCount  int                    // 字符串常量计数器
+	stringType   *llvmTypes.StructType  // 字符串结构体类型 {i8*, i32}
 	printfFunc   *ir.Func               // printf 函数声明
 	putsFunc     *ir.Func               // puts 函数声明
 	putcharFunc  *ir.Func               // putchar 函数声明
+	strConcatFunc *ir.Func              // 字符串连接函数
+	strEqFunc    *ir.Func               // 字符串相等比较函数
+	strNeFunc    *ir.Func               // 字符串不等比较函数
+	strIndexFunc *ir.Func               // 字符串索引访问函数
 }
 
 // New 创建一个新的代码生成器
 // 参数 analyzer: 语义分析器（用于获取类型信息）
 // 返回值: 初始化好的 Generator
 func New(analyzer *semantic.Analyzer) *Generator {
+	// 定义字符串结构体类型：struct { i8* data, i32 length }
+	stringType := llvmTypes.NewStruct(
+		llvmTypes.NewPointer(llvmTypes.I8), // data: i8*
+		llvmTypes.I32,                       // length: i32
+	)
+
 	return &Generator{
-		module:    ir.NewModule(),
-		analyzer:  analyzer,
-		variables: make(map[string]value.Value),
-		functions: make(map[string]*ir.Func),
+		module:     ir.NewModule(),
+		analyzer:   analyzer,
+		variables:  make(map[string]value.Value),
+		functions:  make(map[string]*ir.Func),
+		stringType: stringType,
 	}
 }
 
@@ -85,18 +97,48 @@ func (g *Generator) declareCLibFunctions() {
 		ir.NewParam("c", llvmTypes.I32))
 }
 
+// declareStringRuntimeFunctions 声明字符串运行时函数
+// 这些函数用于支持字符串操作（连接、比较、索引）
+func (g *Generator) declareStringRuntimeFunctions() {
+	// 声明 str_concat: struct {i8*, i32} str_concat(struct {i8*, i32}, struct {i8*, i32})
+	// 用于字符串连接（+）
+	g.strConcatFunc = g.module.NewFunc("str_concat", g.stringType,
+		ir.NewParam("s1", g.stringType),
+		ir.NewParam("s2", g.stringType))
+
+	// 声明 str_eq: i32 str_eq(struct {i8*, i32}, struct {i8*, i32})
+	// 用于字符串相等比较（==）
+	g.strEqFunc = g.module.NewFunc("str_eq", llvmTypes.I32,
+		ir.NewParam("s1", g.stringType),
+		ir.NewParam("s2", g.stringType))
+
+	// 声明 str_ne: i32 str_ne(struct {i8*, i32}, struct {i8*, i32})
+	// 用于字符串不等比较（!=）
+	g.strNeFunc = g.module.NewFunc("str_ne", llvmTypes.I32,
+		ir.NewParam("s1", g.stringType),
+		ir.NewParam("s2", g.stringType))
+
+	// 声明 str_index: i32 str_index(struct {i8*, i32}, i32)
+	// 用于字符串索引访问（[]）
+	g.strIndexFunc = g.module.NewFunc("str_index", llvmTypes.I32,
+		ir.NewParam("s", g.stringType),
+		ir.NewParam("index", llvmTypes.I32))
+}
+
 // ========== 代码生成入口 ==========
 
 // Generate 为整个程序生成 LLVM IR
 // 参数 program: 经过语义分析的 AST
 // 返回值: (LLVM 模块, 错误)
 //
-// 生成策略（三步）：
+// 生成策略（四步）：
 // 第一步：声明 C 标准库函数（printf, puts, putchar）
 //   - 这样可以在代码中调用这些函数
-// 第二步：声明所有函数签名
+// 第二步：声明字符串运行时函数（str_concat, str_eq, str_ne, str_index）
+//   - 支持字符串操作
+// 第三步：声明所有函数签名
 //   - 这样可以支持函数的前向引用
-// 第三步：生成函数体
+// 第四步：生成函数体
 //   - 生成详细的 LLVM IR 指令
 //
 // 生成的 LLVM IR 特点：
@@ -107,7 +149,10 @@ func (g *Generator) Generate(program *parser.Program) (*ir.Module, error) {
 	// 第一步：声明 C 标准库函数
 	g.declareCLibFunctions()
 
-	// 第二步：声明所有函数签名
+	// 第二步：声明字符串运行时函数
+	g.declareStringRuntimeFunctions()
+
+	// 第三步：声明所有函数签名
 	for _, fn := range program.Functions {
 		if err := g.declareFunctionSignature(fn); err != nil {
 			return nil, err
@@ -444,24 +489,44 @@ func (g *Generator) generateExpression(expr parser.Expression) (value.Value, err
 	}
 }
 
-// generateStringConstant generates a global string constant
+// generateStringConstant generates a string struct constant from a string literal
 // 参数 str: 字符串内容
-// 返回值: 指向字符串常量的指针（i8*）
+// 返回值: 字符串结构体值 {i8* data, i32 length}
 func (g *Generator) generateStringConstant(str string) value.Value {
 	// 创建字符串常量名（例如：.str.0, .str.1, ...）
 	name := fmt.Sprintf(".str.%d", g.stringCount)
 	g.stringCount++
 
-	// 创建全局字符串常量（需要添加 \00 结尾）
+	// 创建全局字符串常量（需要添加 \00 结尾以兼容 C 函数）
 	strWithNull := str + "\x00"
 	arrayType := llvmTypes.NewArray(uint64(len(strWithNull)), llvmTypes.I8)
 	globalStr := g.module.NewGlobalDef(name, constant.NewCharArrayFromString(strWithNull))
 	globalStr.Linkage = enum.LinkagePrivate
 	globalStr.UnnamedAddr = enum.UnnamedAddrUnnamedAddr
 
-	// 返回指向字符串首元素的指针（getelementptr）
+	// 获取指向字符串首元素的指针（getelementptr）
 	zero := constant.NewInt(llvmTypes.I64, 0)
-	return constant.NewGetElementPtr(arrayType, globalStr, zero, zero)
+	dataPtr := constant.NewGetElementPtr(arrayType, globalStr, zero, zero)
+
+	// 创建字符串结构体常量：{i8* data, i32 length}
+	// 注意：length 不包括 null 终止符
+	length := constant.NewInt(llvmTypes.I32, int64(len(str)))
+	return constant.NewStruct(g.stringType, dataPtr, length)
+}
+
+// extractStringData extracts the data pointer (i8*) from a string struct
+// 参数 stringStruct: 字符串结构体值 {i8* data, i32 length}
+// 返回值: data 指针（i8*）用于传递给 C 函数（如 printf, puts）
+func (g *Generator) extractStringData(stringStruct value.Value) value.Value {
+	// 检查是否是常量结构体
+	if constStruct, ok := stringStruct.(*constant.Struct); ok {
+		// 对于常量结构体，直接返回第 0 个字段（data 指针）
+		// 新版本 LLVM 不再支持 extractvalue 常量表达式
+		return constStruct.Fields[0]
+	}
+
+	// 对于运行时值，使用 builder.NewExtractValue
+	return g.builder.NewExtractValue(stringStruct, 0)
 }
 
 // generateIdentifier generates LLVM IR for an identifier
@@ -491,6 +556,8 @@ func (g *Generator) generateBinaryExpr(expr *parser.BinaryExpr) (value.Value, er
 		return g.generateIntBinaryOp(left, right, expr.Operator)
 	} else if exprType.Equals(types.FloatType) {
 		return g.generateFloatBinaryOp(left, right, expr.Operator)
+	} else if exprType.Equals(types.StringType) {
+		return g.generateStringBinaryOp(left, right, expr.Operator)
 	}
 
 	return nil, fmt.Errorf("unsupported binary operation type")
@@ -555,6 +622,23 @@ func (g *Generator) generateFloatBinaryOp(left, right value.Value, op string) (v
 		return g.builder.NewFCmp(enum.FPredOGE, left, right), nil
 	default:
 		return nil, fmt.Errorf("unsupported float binary operator: %s", op)
+	}
+}
+
+// generateStringBinaryOp generates LLVM IR for string binary operations
+func (g *Generator) generateStringBinaryOp(left, right value.Value, op string) (value.Value, error) {
+	switch op {
+	case "+":
+		// 字符串连接：调用 str_concat(s1, s2)
+		return g.builder.NewCall(g.strConcatFunc, left, right), nil
+	case "==":
+		// 字符串相等比较：调用 str_eq(s1, s2)
+		return g.builder.NewCall(g.strEqFunc, left, right), nil
+	case "!=":
+		// 字符串不等比较：调用 str_ne(s1, s2)
+		return g.builder.NewCall(g.strNeFunc, left, right), nil
+	default:
+		return nil, fmt.Errorf("unsupported string binary operator: %s (only +, ==, != are supported)", op)
 	}
 }
 
@@ -626,27 +710,37 @@ func (g *Generator) generatePrintCall(expr *parser.CallExpr) (value.Value, error
 	// 如果只有一个参数且是字符串，使用 puts
 	if len(expr.Arguments) == 1 {
 		if _, ok := expr.Arguments[0].(*parser.StringLiteral); ok {
-			return g.builder.NewCall(g.putsFunc, firstArg), nil
+			// 字符串字面量：提取 data 指针传递给 puts
+			dataPtr := g.extractStringData(firstArg)
+			return g.builder.NewCall(g.putsFunc, dataPtr), nil
 		}
 		// 如果是整数，使用 printf 格式化输出
 		if _, ok := expr.Arguments[0].(*parser.IntLiteral); ok {
 			formatStr := g.generateStringConstant("%d\n")
-			return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+			formatDataPtr := g.extractStringData(formatStr)
+			return g.builder.NewCall(g.printfFunc, formatDataPtr, firstArg), nil
 		}
 		// 如果是浮点数，使用 printf 格式化输出
 		if _, ok := expr.Arguments[0].(*parser.FloatLiteral); ok {
 			formatStr := g.generateStringConstant("%f\n")
-			return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+			formatDataPtr := g.extractStringData(formatStr)
+			return g.builder.NewCall(g.printfFunc, formatDataPtr, firstArg), nil
 		}
 		// 对于变量，根据类型判断
 		if ident, ok := expr.Arguments[0].(*parser.Identifier); ok {
 			exprType := g.analyzer.GetExprType(ident)
 			if exprType.Equals(types.IntType) {
 				formatStr := g.generateStringConstant("%d\n")
-				return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+				formatDataPtr := g.extractStringData(formatStr)
+				return g.builder.NewCall(g.printfFunc, formatDataPtr, firstArg), nil
 			} else if exprType.Equals(types.FloatType) {
 				formatStr := g.generateStringConstant("%f\n")
-				return g.builder.NewCall(g.printfFunc, formatStr, firstArg), nil
+				formatDataPtr := g.extractStringData(formatStr)
+				return g.builder.NewCall(g.printfFunc, formatDataPtr, firstArg), nil
+			} else if exprType.Equals(types.StringType) {
+				// 字符串变量：提取 data 指针传递给 puts
+				dataPtr := g.extractStringData(firstArg)
+				return g.builder.NewCall(g.putsFunc, dataPtr), nil
 			}
 		}
 	}
@@ -654,7 +748,9 @@ func (g *Generator) generatePrintCall(expr *parser.CallExpr) (value.Value, error
 	// 多个参数时，使用 printf（第一个参数必须是格式字符串）
 	if _, ok := expr.Arguments[0].(*parser.StringLiteral); ok {
 		var args []value.Value
-		args = append(args, firstArg)
+		// 第一个参数是格式字符串，提取 data 指针
+		formatDataPtr := g.extractStringData(firstArg)
+		args = append(args, formatDataPtr)
 		for i := 1; i < len(expr.Arguments); i++ {
 			arg, err := g.generateExpression(expr.Arguments[i])
 			if err != nil {
@@ -675,6 +771,8 @@ func (g *Generator) getLLVMType(typeStr string) (llvmTypes.Type, error) {
 		return llvmTypes.I32, nil
 	case "float":
 		return llvmTypes.Float, nil
+	case "str":
+		return g.stringType, nil
 	case "void":
 		return llvmTypes.Void, nil
 	default:
@@ -688,6 +786,8 @@ func (g *Generator) typeToLLVMType(t types.Type) (llvmTypes.Type, error) {
 		return llvmTypes.I32, nil
 	} else if t.Equals(types.FloatType) {
 		return llvmTypes.Float, nil
+	} else if t.Equals(types.StringType) {
+		return g.stringType, nil
 	}
 	return nil, fmt.Errorf("unknown type: %s", t.String())
 }

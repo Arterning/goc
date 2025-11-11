@@ -252,7 +252,7 @@ func (p *Parser) parseBlockStmt() *BlockStmt {
 // parseStatement parses a statement
 func (p *Parser) parseStatement() Statement {
 	switch p.curToken.Type {
-	case lexer.INT, lexer.FLOAT:
+	case lexer.INT, lexer.FLOAT, lexer.STR:
 		return p.parseVarDeclStmt()
 	case lexer.RETURN:
 		return p.parseReturnStmt()
